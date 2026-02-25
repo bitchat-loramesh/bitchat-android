@@ -448,5 +448,7 @@
     <item quantity="one">1 person</item>
     <item quantity="other">%d people</item>
   </plurals>
+    <string name="about_meshtastic_tip">allow messages to travel on the meshtastic network</string>
+    <string name="about_meshtastic">mestastic network</string>
 
 </resources>

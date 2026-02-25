@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Webhook
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,6 +36,7 @@ import com.bitchat.android.core.ui.component.sheet.BitchatBottomSheet
 import com.bitchat.android.net.TorMode
 import com.bitchat.android.net.TorPreferenceManager
 import com.bitchat.android.net.ArtiTorManager
+import com.bitchat.android.meshtastic.MeshPreferenceManager
 
 /**
  * Feature row for displaying app capabilities
@@ -365,9 +367,13 @@ fun AboutSheet(
 
                     // Settings Section - Unified Card with Toggles
                     item(key = "settings") {
-                        LaunchedEffect(Unit) { PoWPreferenceManager.init(context) }
+                        LaunchedEffect(Unit) { 
+                            PoWPreferenceManager.init(context)
+                            MeshPreferenceManager.init(context)
+                        }
                         val powEnabled by PoWPreferenceManager.powEnabled.collectAsState()
                         val powDifficulty by PoWPreferenceManager.powDifficulty.collectAsState()
+                        val meshEnabled by MeshPreferenceManager.meshEnabled.collectAsState()
                         var backgroundEnabled by remember { mutableStateOf(com.bitchat.android.service.MeshServicePreferences.isBackgroundEnabled(true)) }
                         val torMode = remember { mutableStateOf(TorPreferenceManager.get(context)) }
                         val torProvider = remember { ArtiTorManager.getInstance() }
@@ -451,6 +457,17 @@ fun AboutSheet(
                                                 ) {}
                                             }
                                         } else null
+                                    )
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 56.dp),
+                                        color = colorScheme.outline.copy(alpha = 0.12f)
+                                    )
+                                    SettingsToggleRow(
+                                        icon = Icons.Filled.Webhook,
+                                        title = stringResource(R.string.about_meshtastic),
+                                        subtitle = stringResource(R.string.about_meshtastic_tip),
+                                        checked = meshEnabled,
+                                        onCheckedChange = { MeshPreferenceManager.setMeshEnabled(it) }
                                     )
                                 }
                             }
