@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.kotlin.compose)
+    id("com.squareup.wire")
 }
 
 android {
@@ -150,4 +151,13 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.bundles.compose.testing)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    // Meshtastic
+    implementation("com.squareup.wire:wire-runtime:4.9.3")
+}
+wire {
+    kotlin {}
+    sourcePath {
+        srcDir("src/main")
+        include("meshtastic/*.proto")
+    }
 }

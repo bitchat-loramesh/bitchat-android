@@ -26,7 +26,11 @@ import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.ui.media.FullScreenImageViewer
-
+import com.bitchat.android.meshtastic.MeshtasticBleManager
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.collectAsState
+import com.bitchat.android.meshtastic.MeshtasticBleService
 /**
  * Main ChatScreen - REFACTORED to use component-based architecture
  * This is now a coordinator that orchestrates the following UI components:
@@ -74,7 +78,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var initialViewerIndex by remember { mutableStateOf(0) }
     var forceScrollToBottom by remember { mutableStateOf(false) }
     var isScrolledUp by remember { mutableStateOf(false) }
-
     // Show password dialog when needed
     LaunchedEffect(showPasswordPrompt) {
         showPasswordDialog = showPasswordPrompt
@@ -423,7 +426,11 @@ private fun ChatFloatingHeader(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val locationManager = remember { com.bitchat.android.geohash.LocationChannelManager.getInstance(context) }
-    
+    val bleManager = remember { MeshtasticBleService.getInstance(context) }
+    var showMeshtasticSheet by remember { mutableStateOf(false) }
+    val isBleEnabled by bleManager.isBluetoothEnabled.collectAsState()
+    val discoveredDevices by bleManager.discoveredDevices.collectAsState()
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -452,6 +459,10 @@ private fun ChatFloatingHeader(
                         // Ensure location is loaded before showing sheet
                         locationManager.refreshChannels()
                         onLocationNotesClick()
+                    },
+                    onMeshtasticClick = {
+                        showMeshtasticSheet = true
+                        bleManager.startScan()
                     }
                 )
             },
@@ -460,6 +471,34 @@ private fun ChatFloatingHeader(
             ),
             modifier = Modifier.height(headerHeight) // Ensure compact header height
         )
+    }
+    if (showMeshtasticSheet) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+        ModalBottomSheet(
+            onDismissRequest = {
+                showMeshtasticSheet = false
+                bleManager.stopScan()
+            },
+            sheetState = sheetState,
+            containerColor = Color.Transparent,
+            dragHandle = null
+        ) {
+            com.bitchat.android.ui.MeshtasticManagementScreen(
+                devices = discoveredDevices,
+                onDismiss = {
+                    showMeshtasticSheet = false
+                    bleManager.stopScan()
+                },
+                onDeviceClick = { device ->
+                    if (!device.isConnected) {
+                        bleManager.connectToMeshtastic(device.device)
+                    } else {
+                        bleManager.disconnectFromMeshtastic(device.device)
+                    }
+                }
+            )
+        }
     }
 }
 

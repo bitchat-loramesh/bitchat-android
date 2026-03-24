@@ -226,7 +226,8 @@ fun ChatHeaderContent(
     onTripleClick: () -> Unit,
     onShowAppInfo: () -> Unit,
     onLocationChannelsClick: () -> Unit,
-    onLocationNotesClick: () -> Unit
+    onLocationNotesClick: () -> Unit,
+    onMeshtasticClick: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
 
@@ -250,6 +251,7 @@ fun ChatHeaderContent(
                 onSidebarClick = onSidebarClick,
                 onLocationChannelsClick = onLocationChannelsClick,
                 onLocationNotesClick = onLocationNotesClick,
+                onMeshtasticClick = onMeshtasticClick,
                 viewModel = viewModel
             )
         }
@@ -331,6 +333,7 @@ private fun MainHeader(
     onSidebarClick: () -> Unit,
     onLocationChannelsClick: () -> Unit,
     onLocationNotesClick: () -> Unit,
+    onMeshtasticClick : () -> Unit,
     viewModel: ChatViewModel
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -377,9 +380,30 @@ private fun MainHeader(
         // Right section with location channels button and peer counter
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clickable { onMeshtasticClick() }
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SettingsInputAntenna,
+                    contentDescription = "Meshtastic Settings",
+                    modifier = Modifier.size(16.dp),
+                    tint = Color(0xFF007AFF) // Bleu Mesh utilisé dans PeerCounter
+                )
+                Spacer(modifier = Modifier.width(2.dp))
+                Text(
+                    text = "MESH",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = Color(0xFF007AFF)
+                )
+            }
             // Unread private messages badge (click to open most recent DM)
             if (hasUnreadPrivateMessages.isNotEmpty()) {
                 // Render icon directly to avoid symbol resolution issues

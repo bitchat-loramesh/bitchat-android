@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -42,6 +45,11 @@ import com.bitchat.android.ui.OrientationAwareActivity
 import com.bitchat.android.ui.theme.BitchatTheme
 import com.bitchat.android.nostr.PoWPreferenceManager
 import com.bitchat.android.services.VerificationService
+import com.bitchat.android.meshtastic.MeshtasticBleManager
+import com.bitchat.android.meshtastic.MeshtasticConverter
+import com.bitchat.android.meshtastic.MeshtasticDevice
+import com.bitchat.android.meshtastic.MeshtasticGattManager
+import com.bitchat.android.ui.MeshtasticManagementScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -170,6 +178,42 @@ class MainActivity : OrientationAwareActivity() {
         if (mainViewModel.onboardingState.value == OnboardingState.CHECKING) {
             checkOnboardingStatus()
         }
+
+//        val bleManager = MeshtasticBleManager(this)
+//        var hasAttemptedConnection = false
+//        var hasSentMessage = false
+//
+//        lifecycleScope.launch {
+//            bleManager.discoveredDevices.collect { devices ->
+//                val node = devices.firstOrNull()
+//
+//                // 1. Si on trouve un nœud et qu'on n'a pas encore essayé de se connecter
+//                if (node != null && !hasAttemptedConnection) {
+//                    hasAttemptedConnection = true
+//                    Log.i("TEST_MESH", "Nœud trouvé : ${node.name} (${node.identifier}). Arrêt du scan et connexion...")
+//
+//                    bleManager.stopScan() // Toujours arrêter le scan avant de se connecter (meilleure stabilité BLE)
+//                    bleManager.connectToMeshtastic(node.device)
+//                }
+//
+//                // 2. Si le nœud est officiellement connecté et qu'on n'a pas encore envoyé le message
+//                if (node?.isConnected == true && !hasSentMessage) {
+//                    hasSentMessage = true // On le met à true pour ne pas spammer la radio
+//
+//                    Log.i("TEST_MESH", "✅ Connexion GATT réussie à ${node.name} !")
+//                    Log.i("TEST_MESH", "🚀 Envoi du message test vers la radio...")
+//
+//                    // Préparation du message brut (qui sera converti en ATAK/Protobuf en interne)
+//                    val textMessage = "Hello depuis BitChat Android !".toByteArray(Charsets.UTF_8)
+//
+//                    // Envoi !
+//                    bleManager.sendMessage(textMessage)
+//                }
+//            }
+//        }
+//
+//        Log.i("TEST_MESH", "Démarrage du scan BLE...")
+//        bleManager.startScan()
     }
     
     @Composable
