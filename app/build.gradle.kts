@@ -127,6 +127,7 @@ dependencies {
     
     // Bluetooth
     implementation(libs.nordic.ble)
+    implementation(libs.nordic.ble.ktx)
 
     // WebSocket
     implementation(libs.okhttp)
@@ -158,6 +159,6 @@ wire {
     kotlin {}
     sourcePath {
         srcDir("src/main")
-        include("meshtastic/*.proto")
+        include("proto/**/*.proto")
     }
 }

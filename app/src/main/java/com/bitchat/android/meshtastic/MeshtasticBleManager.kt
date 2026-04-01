@@ -15,7 +15,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 @SuppressLint("MissingPermission")
 class MeshtasticBleManager(private val context: Context) {
 
@@ -31,7 +33,9 @@ class MeshtasticBleManager(private val context: Context) {
     // Discovered devices
     private val _discoveredDevices = MutableStateFlow<List<MeshtasticDevice>>(emptyList())
     val discoveredDevices: StateFlow<List<MeshtasticDevice>> = _discoveredDevices.asStateFlow()
-
+    // Diffusion channel for incoming messages
+    private val _incomingMessages = MutableSharedFlow<ByteArray>(extraBufferCapacity = 50)
+    val incomingMessages: SharedFlow<ByteArray> = _incomingMessages.asSharedFlow()
     // Callback for scan results
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -71,7 +75,7 @@ class MeshtasticBleManager(private val context: Context) {
         val pairedDevices = bluetoothAdapter.bondedDevices
         val meshtasticPaired = pairedDevices?.filter { device ->
             val name = device.name ?: ""
-            // Usual keywords for meshtastic devices
+            // Usual keywords for proto devices
             name.contains("Mesh", ignoreCase = true) ||
                     name.contains("Node", ignoreCase = true) ||
                     name.contains("LI", ignoreCase = false)
@@ -130,9 +134,10 @@ class MeshtasticBleManager(private val context: Context) {
             }
 
             // Message receival
-            onMessageReceived = { _ ->
-                // TODO: Envoyer ce payload au ChatViewModel pour l'afficher dans la conversation
-                Log.i("MeshtasticBleManager", "Message reçu du Mesh pour l'UI !")
+            onMessageReceived = { payload ->
+                Log.i("MeshtasticBleManager", "Transmitting payload to ViewModel (${payload.size} octets)")
+                // tryEmit pushes the message in the SharedFlow in asynchronous way
+                _incomingMessages.tryEmit(payload)
             }
         }
 

@@ -101,6 +101,7 @@ kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutine
 
 # Bluetooth
 nordic-ble = { module = "no.nordicsemi.android:ble", version.ref = "nordic-ble" }
+nordic-ble-ktx = { module = "no.nordicsemi.android:ble-ktx", version.ref = "nordic-ble" }
 
 # WebSocket
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }

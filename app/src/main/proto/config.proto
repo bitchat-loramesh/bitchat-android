@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package meshtastic;
+package proto;
 
-import "meshtastic/device_ui.proto";
+import "proto/device_ui.proto";
 
 option csharp_namespace = "Meshtastic.Protobufs";
 option go_package = "github.com/meshtastic/go/generated";
@@ -544,7 +544,7 @@ message Config {
         string wifi_psk = 4;
 
         /*
-         * NTP server to use if WiFi is conneced, defaults to `meshtastic.pool.ntp.org`
+         * NTP server to use if WiFi is conneced, defaults to `proto.pool.ntp.org`
          */
         string ntp_server = 5;
 

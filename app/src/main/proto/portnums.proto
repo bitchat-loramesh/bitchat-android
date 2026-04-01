@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package meshtastic;
+package proto;
 
 option csharp_namespace = "Meshtastic.Protobufs";
 option go_package = "github.com/meshtastic/go/generated";

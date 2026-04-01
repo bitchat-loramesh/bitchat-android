@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 /* trunk-ignore(buf-lint/PACKAGE_DIRECTORY_MATCH) */
-package meshtastic;
+package proto;
 
 option csharp_namespace = "Meshtastic.Protobufs";
 option go_package = "github.com/meshtastic/go/generated";
@@ -61,7 +61,7 @@ message ChannelSettings {
     /*
      * Used to construct a globally unique channel ID.
      * The full globally unique ID will be: "name.id" where ID is shown as base36.
-     * Assuming that the number of meshtastic users is below 20K (true for a long time)
+     * Assuming that the number of proto users is below 20K (true for a long time)
      * the chance of this 64 bit random number colliding with anyone else is super low.
      * And the penalty for collision is low as well, it just means that anyone trying to decrypt channel messages might need to
      * try multiple candidate channels.

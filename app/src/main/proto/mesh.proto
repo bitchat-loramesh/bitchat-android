@@ -1,14 +1,14 @@
 syntax = "proto3";
 
-package meshtastic;
+package proto;
 
-import "meshtastic/channel.proto";
-import "meshtastic/config.proto";
-import "meshtastic/device_ui.proto";
-import "meshtastic/module_config.proto";
-import "meshtastic/portnums.proto";
-import "meshtastic/telemetry.proto";
-import "meshtastic/xmodem.proto";
+import "proto/channel.proto";
+import "proto/config.proto";
+import "proto/device_ui.proto";
+import "proto/module_config.proto";
+import "proto/portnums.proto";
+import "proto/telemetry.proto";
+import "proto/xmodem.proto";
 
 option csharp_namespace = "Meshtastic.Protobufs";
 option go_package = "github.com/meshtastic/go/generated";
@@ -1382,7 +1382,7 @@ message MeshPacket {
      * of transmission (because interfaces are fairly fast).
      * But for lora where packets can take a few seconds each, it is very important
      * to make sure that critical packets are sent ASAP.
-     * In the case of meshtastic that means we want to send protocol acks as soon as possible
+     * In the case of proto that means we want to send protocol acks as soon as possible
      * (to prevent unneeded retransmissions), we want routing messages to be sent next,
      * then messages marked as reliable and finally 'background' packets like periodic position updates.
      * So I bit the bullet and implemented a new (internal - not sent over the air)
@@ -1807,7 +1807,7 @@ message NodeInfo {
 /*
  * Error codes for critical errors
  * The device might report these fault codes on the screen.
- * If you encounter a fault code, please post on the meshtastic.discourse.group
+ * If you encounter a fault code, please post on the proto.discourse.group
  * and we'll try to help.
  */
 enum CriticalErrorCode {

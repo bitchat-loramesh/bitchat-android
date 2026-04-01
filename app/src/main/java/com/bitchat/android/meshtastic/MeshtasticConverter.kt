@@ -68,7 +68,8 @@ object MeshtasticConverter {
 
             ToRadio(
                 packet = MeshPacket(
-                    to = BROADCAST_ADDR,
+                    to = BROADCAST_ADDR.toLong().toInt(), // Note: BROADCAST_ADDR is -1, MeshPacket.to is fixed32 (Long in Wire if unsigned, but usually Int)
+                    // Actually Wire handles fixed32 as Int.
                     want_ack = false,
                     decoded = Data(
                         portnum = PortNum.ATAK_PLUGIN,

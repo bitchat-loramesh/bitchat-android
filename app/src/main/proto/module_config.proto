@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package meshtastic;
+package proto;
 
-import "meshtastic/atak.proto";
+import "proto/atak.proto";
 
 option csharp_namespace = "Meshtastic.Protobufs";
 option go_package = "github.com/meshtastic/go/generated";

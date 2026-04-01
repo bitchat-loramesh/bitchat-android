@@ -7,6 +7,13 @@ import android.content.Context
 import android.util.Log
 import no.nordicsemi.android.ble.BleManager
 import no.nordicsemi.android.ble.data.Data
+import kotlin.random.Random
+import org.meshtastic.proto.ToRadio
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import no.nordicsemi.android.ble.ktx.suspend
 
 class MeshtasticGattManager(context: Context) : BleManager(context) {
 
@@ -14,6 +21,7 @@ class MeshtasticGattManager(context: Context) : BleManager(context) {
 
     private var toRadioChar: BluetoothGattCharacteristic? = null
     private var fromRadioChar: BluetoothGattCharacteristic? = null
+    private var fromNumChar: BluetoothGattCharacteristic? = null
 
     // Callback to inform the app that a Bitchat message has been received
     var onMessageReceived: ((ByteArray) -> Unit)? = null
@@ -30,32 +38,82 @@ class MeshtasticGattManager(context: Context) : BleManager(context) {
             if (service != null) {
                 toRadioChar = service.getCharacteristic(MeshtasticConverter.MESHTASTIC_TORADIO_UUID)
                 fromRadioChar = service.getCharacteristic(MeshtasticConverter.MESHTASTIC_FROMRADIO_UUID)
+                fromNumChar = service.getCharacteristic(MeshtasticConverter.MESHTASTIC_FROMNUM_UUID)
             }
 
             // Connexion is valid only if these characteristics are supported
-            val isSupported = toRadioChar != null && fromRadioChar != null
+            val isSupported = toRadioChar != null && fromRadioChar != null && fromNumChar != null
             if (!isSupported) Log.e(TAG, "The device doesn't support the required characteristics")
             return isSupported
         }
 
         // Initialisation : Subscribe to notifications (incoming messages)
         override fun initialize() {
-            // Meshtastic needs a larger MTU (Maximum Transmission Unit) for Protobufs
-            requestMtu(512).enqueue()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    requestMtu(512).suspend()
 
-            // We configure the callback to read data coming from FROMRADIO port
-            setNotificationCallback(fromRadioChar).with { _, data ->
-                handleIncomingData(data)
+                    // Configuration of callback pfor when new messages arrive
+                    setNotificationCallback(fromNumChar).with { _, _ ->
+                        Log.d(TAG, "🔔 Notification FROMNUM.")
+                        // We start a coroutine to be able to loop without blocking the BLE thread
+                        CoroutineScope(Dispatchers.IO).launch {
+                            drainRadioBuffer()
+                        }
+                    }
+
+                    // Sending Handshake
+                    val configId = Random.nextInt(1, Int.MAX_VALUE)
+                    val toRadioBytes = ToRadio(want_config_id = configId).encode()
+                    writeCharacteristic(toRadioChar, toRadioBytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT).suspend()
+                    Log.i(TAG, "📤 Handshake sent (want_config_id: $configId)")
+
+                    // We free the initial queue (Configuration, Nodes, etc.)
+                    Log.i(TAG, "⏳ Downloading initial configuration...")
+                    drainRadioBuffer()
+
+                    delay(500)
+
+                    enableNotifications(fromNumChar).suspend()
+                    Log.i(TAG, "✅ Handshake done, now listening !")
+
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error while BLE handshake", e)
+                }
             }
+        }
 
-            // We really activate notifications on the device
-            enableNotifications(fromRadioChar).enqueue()
-            Log.i(TAG, "Notifications FROMRADIO activated.")
+        /**
+         * Reads FROMRADIO port until the radio sends an empty packet.
+         * Essential to respect the Meshtastic protocol.
+         */
+        private suspend fun drainRadioBuffer() {
+            var isEmpty = false
+            var packetCount = 0
+
+            while (!isEmpty) {
+                try {
+                    val data = readCharacteristic(fromRadioChar).suspend()
+                    val bytes = data.value
+
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        packetCount++
+                        handleIncomingData(data)
+                    } else {
+                        isEmpty = true
+                        Log.d(TAG, "📭 FROMRADIO buffer freed ($packetCount packets read this time).")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error during reading loop", e)
+                    isEmpty = true
+                }
+            }
         }
 
         override fun onServicesInvalidated() {
             toRadioChar = null
             fromRadioChar = null
+            fromNumChar = null
         }
     }
 
@@ -68,7 +126,7 @@ class MeshtasticGattManager(context: Context) : BleManager(context) {
         val bitchatPayload = MeshtasticConverter.toBitchat(bytes)
 
         if (bitchatPayload != null) {
-            Log.i(TAG, "Paquet ATAK décodé avec succès ! Transmission à BitChat.")
+            Log.i(TAG, "ATAK packet successfully decoded ! Transmission to BitChat.")
             onMessageReceived?.invoke(bitchatPayload)
         }
     }
@@ -91,6 +149,6 @@ class MeshtasticGattManager(context: Context) : BleManager(context) {
             .split()
             .enqueue()
 
-        Log.d(TAG, "Message envoyé dans la file d'attente BLE (${meshtasticData.size} octets)")
+        Log.d(TAG, "Message sent to BLE queue (${meshtasticData.size} octets)")
     }
 }
