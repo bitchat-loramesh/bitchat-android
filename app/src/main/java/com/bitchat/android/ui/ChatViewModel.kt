@@ -31,7 +31,7 @@ import com.bitchat.android.nostr.GeohashAliasRegistry
 import com.bitchat.android.util.dataFromHexString
 import com.bitchat.android.util.hexEncodedString
 import java.security.MessageDigest
-
+import com.bitchat.android.meshtastic.MeshtasticBleService
 /**
  * Refactored ChatViewModel - Main coordinator for bitchat functionality
  * Delegates specific responsibilities to specialized managers while maintaining 100% iOS compatibility
@@ -45,7 +45,7 @@ class ChatViewModel(
     var meshService: BluetoothMeshService = initialMeshService
         private set
     private val debugManager by lazy { try { com.bitchat.android.ui.debug.DebugSettingsManager.getInstance() } catch (e: Exception) { null } }
-
+    private val bleManager = MeshtasticBleService.getInstance(application)
     companion object {
         private const val TAG = "ChatViewModel"
     }
@@ -229,10 +229,65 @@ class ChatViewModel(
                 mediaSendingManager.handleTransferProgressEvent(evt)
             }
         }
+        viewModelScope.launch {
+            bleManager.incomingMessages.collect { payload ->
+                handleMeshtasticMessage(payload)
+            }
+        }
         
         // Removed background location notes subscription. Notes now load only when sheet opens.
     }
+    private fun handleMeshtasticMessage(payload: ByteArray) {
+        // Primary path: TAKPacket.detail contains a full BitchatPacket binary encoding
+        // (the format used by iOS bitchat-loramesh).
+        val bitchatPacket = com.bitchat.android.protocol.BinaryProtocol.decode(payload)
+        if (bitchatPacket != null &&
+            bitchatPacket.type == com.bitchat.android.protocol.MessageType.MESSAGE.value) {
 
+            val messageText = String(bitchatPacket.payload, Charsets.UTF_8)
+            val senderPeerID = bitchatPacket.senderID.joinToString("") { "%02x".format(it) }
+            // Use the known nickname for this peerID if we have one, otherwise show a
+            // short LoRa identifier so the user knows the source.
+            val senderName = meshService.getPeerNicknames()[senderPeerID]
+                ?: "LoRa:${senderPeerID.take(8)}"
+
+            if (messageText.isNotBlank()) {
+                Log.i(TAG, "💬 LoRa BitchatPacket from $senderPeerID ($senderName): $messageText")
+                messageManager.addMessage(BitchatMessage(
+                    sender = senderName,
+                    content = messageText,
+                    timestamp = Date(bitchatPacket.timestamp.toLong()),
+                    isRelay = false,
+                    senderPeerID = senderPeerID,
+                    mentions = null,
+                    channel = null
+                ))
+            }
+            return
+        }
+
+        // Fallback: TAKPacket.chat path — plain UTF-8 text from a non-bitchat ATAK source
+        // or a GeoChat message from an older/different client.
+        try {
+            val messageText = String(payload, Charsets.UTF_8)
+            if (messageText.isNotBlank()) {
+                Log.i(TAG, "💬 LoRa plain-text message: $messageText")
+                messageManager.addMessage(BitchatMessage(
+                    sender = "LoRa",
+                    content = messageText,
+                    timestamp = Date(),
+                    isRelay = false,
+                    senderPeerID = "lora_node",
+                    mentions = null,
+                    channel = null
+                ))
+            } else {
+                Log.w(TAG, "💬 Unrecognised LoRa payload (${payload.size} bytes) — not a BitchatPacket or plain text")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to decode LoRa payload", e)
+        }
+    }
     fun cancelMediaSend(messageId: String) {
         // Delegate to MediaSendingManager which tracks transfer IDs and cleans up UI state
         mediaSendingManager.cancelMediaSend(messageId)
@@ -574,6 +629,24 @@ class ChatViewModel(
                 } else {
                     messageManager.addMessage(message)
                     meshService.sendMessage(content, mentions, null)
+                    val isMeshtasticConnected = bleManager.discoveredDevices.value.any { it.isConnected }
+                    if (isMeshtasticConnected) {
+                        Log.i(TAG, "🚀 Forwarding public message to Meshtastic radio...")
+                        // Encode as a full BitchatPacket so the iOS side can decode senderID,
+                        // type, TTL and payload. MeshtasticConverter wraps it in TAKPacket.detail.
+                        val packet = com.bitchat.android.protocol.BitchatPacket(
+                            type = com.bitchat.android.protocol.MessageType.MESSAGE.value,
+                            ttl = com.bitchat.android.util.AppConstants.MESSAGE_TTL_HOPS,
+                            senderID = meshService.myPeerID,
+                            payload = content.toByteArray(Charsets.UTF_8)
+                        )
+                        val encoded = packet.toBinaryData()
+                        if (encoded != null) {
+                            bleManager.sendMessage(encoded)
+                        } else {
+                            Log.e(TAG, "Failed to encode BitchatPacket for LoRa send")
+                        }
+                    }
                 }
             }
         }

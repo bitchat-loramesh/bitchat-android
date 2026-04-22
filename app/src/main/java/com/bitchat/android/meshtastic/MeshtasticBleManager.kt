@@ -27,7 +27,7 @@ class MeshtasticBleManager(private val context: Context) {
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
     private val scanner = bluetoothAdapter?.bluetoothLeScanner
 
-    // Bluetooth state
+    // Bluetooth enabled state
     private val _isBluetoothEnabled = MutableStateFlow(bluetoothAdapter?.isEnabled == true)
     val isBluetoothEnabled: StateFlow<Boolean> = _isBluetoothEnabled.asStateFlow()
     // Discovered devices
@@ -72,7 +72,7 @@ class MeshtasticBleManager(private val context: Context) {
         _isBluetoothEnabled.value = true
 
         // Fetch devices that are already paired to the phone
-        val pairedDevices = bluetoothAdapter.bondedDevices
+        val pairedDevices = bluetoothAdapter?.bondedDevices
         val meshtasticPaired = pairedDevices?.filter { device ->
             val name = device.name ?: ""
             // Usual keywords for proto devices
@@ -98,7 +98,7 @@ class MeshtasticBleManager(private val context: Context) {
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        scanner.startScan(listOf(filter), settings, scanCallback)
+        scanner?.startScan(listOf(filter), settings, scanCallback)
     }
 
     fun stopScan() {
@@ -159,7 +159,7 @@ class MeshtasticBleManager(private val context: Context) {
     }
     fun sendMessage(payload: ByteArray) {
         if (gattManager == null) {
-            Log.e("MeshtasticBleManager", "Impossible d'envoyer : aucun appareil connecté.")
+            Log.e("MeshtasticBleManager", "Impossible to send message : no device connected.")
             return
         }
         gattManager?.sendToMesh(payload)
