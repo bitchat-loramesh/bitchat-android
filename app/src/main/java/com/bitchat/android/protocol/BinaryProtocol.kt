@@ -17,7 +17,9 @@ enum class MessageType(val value: UByte) {
     NOISE_ENCRYPTED(0x11u),  // Noise encrypted transport message
     FRAGMENT(0x20u), // Fragmentation for large packets
     REQUEST_SYNC(0x21u), // GCS-based sync request
-    FILE_TRANSFER(0x22u); // New: File transfer packet (BLE voice notes, etc.)
+    FILE_TRANSFER(0x22u), // File transfer packet (BLE voice notes, etc.)
+    MTT_HELLO(0x30u),     // LoRa peer discovery — sent to announce presence
+    MTT_HELLOBACK(0x31u); // LoRa peer discovery — reply to a HELLO
 
     companion object {
         fun fromValue(value: UByte): MessageType? {
@@ -79,8 +81,8 @@ data class BitchatPacket(
         ttl = ttl
     )
 
-    fun toBinaryData(): ByteArray? {
-        return BinaryProtocol.encode(this)
+    fun toBinaryData(padding: Boolean = true): ByteArray? {
+        return BinaryProtocol.encode(this, padding = padding)
     }
 
     /**
@@ -198,7 +200,7 @@ object BinaryProtocol {
         }
     }
     
-    fun encode(packet: BitchatPacket): ByteArray? {
+    fun encode(packet: BitchatPacket, padding: Boolean = true): ByteArray? {
         try {
             // Try to compress payload if beneficial
             var payload = packet.payload
@@ -305,12 +307,12 @@ object BinaryProtocol {
             val result = ByteArray(buffer.position())
             buffer.rewind()
             buffer.get(result)
-            
+
+            if (!padding) return result
+
             // Apply padding to standard block sizes for traffic analysis resistance
             val optimalSize = MessagePadding.optimalBlockSize(result.size)
-            val paddedData = MessagePadding.pad(result, optimalSize)
-            
-            return paddedData
+            return MessagePadding.pad(result, optimalSize)
             
         } catch (e: Exception) {
             Log.e("BinaryProtocol", "Error encoding packet type ${packet.type}: ${e.message}")

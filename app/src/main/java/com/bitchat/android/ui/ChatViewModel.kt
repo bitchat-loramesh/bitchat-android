@@ -9,6 +9,7 @@ import com.bitchat.android.favorites.FavoritesPersistenceService
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import com.bitchat.android.mesh.BluetoothMeshDelegate
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.service.MeshServiceHolder
@@ -176,6 +177,23 @@ class ChatViewModel(
     val peerDirect: StateFlow<Map<String, Boolean>> = state.peerDirect
     val showAppInfo: StateFlow<Boolean> = state.showAppInfo
     val showMeshPeerList: StateFlow<Boolean> = state.showMeshPeerList
+
+    // LoRa peers discovered via HELLO/HELLOBACK. Kept for 30 minutes after last seen.
+    // radioName: the Meshtastic node the peer was last seen through.
+    data class LoRaPeer(
+        val peerID: String,
+        val nickname: String,
+        val radioName: String = "",
+        val lastSeen: Long = System.currentTimeMillis()
+    )
+    private val _loraPeers = MutableStateFlow<Map<String, LoRaPeer>>(emptyMap())
+    val loraPeers: StateFlow<Map<String, LoRaPeer>> = _loraPeers.asStateFlow()
+    private val LORA_PEER_TIMEOUT_MS = 30 * 60 * 1000L
+    // Deduplication cache for LoRa packets (same key scheme as SecurityManager)
+    private val loraSeenPackets = object : LinkedHashMap<String, Long>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, Long>) =
+            size > 200 || (System.currentTimeMillis() - eldest.value) > 5 * 60 * 1000L
+    }
     val privateChatSheetPeer: StateFlow<String?> = state.privateChatSheetPeer
     val showVerificationSheet: StateFlow<Boolean> = state.showVerificationSheet
     val showSecurityVerificationSheet: StateFlow<Boolean> = state.showSecurityVerificationSheet
@@ -234,44 +252,80 @@ class ChatViewModel(
                 handleMeshtasticMessage(payload)
             }
         }
-        
+        // Send proactive HELLO when a Meshtastic radio connects
+        viewModelScope.launch {
+            var wasConnected = false
+            bleManager.discoveredDevices.collect { devices ->
+                val isNowConnected = devices.any { it.isConnected }
+                if (isNowConnected && !wasConnected) {
+                    kotlinx.coroutines.delay(600)
+                    sendLoRaHello(com.bitchat.android.protocol.MessageType.MTT_HELLO)
+                }
+                wasConnected = isNowConnected
+            }
+        }
+
         // Removed background location notes subscription. Notes now load only when sheet opens.
     }
     private fun handleMeshtasticMessage(payload: ByteArray) {
-        // Primary path: TAKPacket.detail contains a full BitchatPacket binary encoding
-        // (the format used by iOS bitchat-loramesh).
         val bitchatPacket = com.bitchat.android.protocol.BinaryProtocol.decode(payload)
-        if (bitchatPacket != null &&
-            bitchatPacket.type == com.bitchat.android.protocol.MessageType.MESSAGE.value) {
 
-            val messageText = String(bitchatPacket.payload, Charsets.UTF_8)
+        if (bitchatPacket != null) {
             val senderPeerID = bitchatPacket.senderID.joinToString("") { "%02x".format(it) }
-            // Use the known nickname for this peerID if we have one, otherwise show a
-            // short LoRa identifier so the user knows the source.
-            val senderName = meshService.getPeerNicknames()[senderPeerID]
-                ?: "LoRa:${senderPeerID.take(8)}"
+            // Ignore packets we sent ourselves (Meshtastic mesh relays them back)
+            if (senderPeerID.startsWith(meshService.myPeerID)) return
+            // Deduplicate: same key as SecurityManager (timestamp + sender + payload hash)
+            val payloadHash = bitchatPacket.payload
+                .sliceArray(0 until minOf(64, bitchatPacket.payload.size)).contentHashCode()
+            val packetKey = "${bitchatPacket.timestamp}-$senderPeerID-$payloadHash"
+            if (loraSeenPackets.containsKey(packetKey)) {
+                Log.d(TAG, "🔁 LoRa duplicate dropped: $packetKey")
+                return
+            }
+            loraSeenPackets[packetKey] = System.currentTimeMillis()
+            val type = bitchatPacket.type
 
-            if (messageText.isNotBlank()) {
-                Log.i(TAG, "💬 LoRa BitchatPacket from $senderPeerID ($senderName): $messageText")
-                messageManager.addMessage(BitchatMessage(
-                    sender = senderName,
-                    content = messageText,
-                    timestamp = Date(bitchatPacket.timestamp.toLong()),
-                    isRelay = false,
-                    senderPeerID = senderPeerID,
-                    mentions = null,
-                    channel = null
-                ))
+            when (type) {
+                com.bitchat.android.protocol.MessageType.MESSAGE.value -> {
+                    val messageText = String(bitchatPacket.payload, Charsets.UTF_8)
+                    val senderName = resolveLoRaSenderName(senderPeerID)
+                    if (messageText.isNotBlank()) {
+                        Log.i(TAG, "💬 LoRa MESSAGE from $senderPeerID ($senderName): $messageText")
+                        messageManager.addMessage(BitchatMessage(
+                            sender = senderName,
+                            content = messageText,
+                            timestamp = Date(bitchatPacket.timestamp.toLong()),
+                            isRelay = false,
+                            senderPeerID = senderPeerID,
+                            mentions = null,
+                            channel = null
+                        ))
+                    }
+                }
+
+                com.bitchat.android.protocol.MessageType.MTT_HELLO.value -> {
+                    Log.i(TAG, "👋 LoRa HELLO from $senderPeerID")
+                    processLoRaHello(senderPeerID, bitchatPacket.payload)
+                    sendLoRaHelloBack()
+                }
+
+                com.bitchat.android.protocol.MessageType.MTT_HELLOBACK.value -> {
+                    Log.i(TAG, "👋 LoRa HELLOBACK from $senderPeerID")
+                    processLoRaHello(senderPeerID, bitchatPacket.payload)
+                }
+
+                else -> {
+                    Log.d(TAG, "💬 LoRa packet type=0x${type.toString(16)} from $senderPeerID — ignored")
+                }
             }
             return
         }
 
-        // Fallback: TAKPacket.chat path — plain UTF-8 text from a non-bitchat ATAK source
-        // or a GeoChat message from an older/different client.
+        // Fallback: GeoChat plain text from a non-bitchat ATAK source
         try {
             val messageText = String(payload, Charsets.UTF_8)
             if (messageText.isNotBlank()) {
-                Log.i(TAG, "💬 LoRa plain-text message: $messageText")
+                Log.i(TAG, "💬 LoRa plain-text (GeoChat): $messageText")
                 messageManager.addMessage(BitchatMessage(
                     sender = "LoRa",
                     content = messageText,
@@ -281,13 +335,122 @@ class ChatViewModel(
                     mentions = null,
                     channel = null
                 ))
-            } else {
-                Log.w(TAG, "💬 Unrecognised LoRa payload (${payload.size} bytes) — not a BitchatPacket or plain text")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to decode LoRa payload", e)
         }
     }
+
+    /** Returns the best display name for a LoRa peer ID. */
+    private fun resolveLoRaSenderName(peerID: String): String =
+        _loraPeers.value[peerID]?.nickname
+            ?: meshService.getPeerNicknames()[peerID]
+            ?: "LoRa:${peerID.take(8)}"
+
+    /**
+     * Decodes a HelloPayload from a HELLO or HELLOBACK BitchatPacket payload.
+     * Registers the sender and all peers they know about into _loraPeers and the BLE peer table.
+     */
+    private fun processLoRaHello(senderPeerID: String, payload: ByteArray) {
+        val hello = com.bitchat.android.meshtastic.HelloPayload.decode(payload)
+        if (hello == null) {
+            Log.w(TAG, "👋 Could not decode HelloPayload from $senderPeerID")
+            return
+        }
+
+        val radioName = hello.radioName
+        val now = System.currentTimeMillis()
+
+        Log.i(TAG, "👋 HelloPayload from $senderPeerID via radio '$radioName' — ${hello.peers.size} peers")
+
+        _loraPeers.update { current ->
+            val pruned = current.filter { e -> now - e.value.lastSeen < LORA_PEER_TIMEOUT_MS }.toMutableMap()
+
+            // Register the sender itself (nickname comes from their self-entry in peers list)
+            val senderNickname = hello.peers.firstOrNull { it.peerID == senderPeerID }?.nickname
+                ?: "LoRa:${senderPeerID.take(8)}"
+            pruned[senderPeerID] = LoRaPeer(senderPeerID, senderNickname, radioName, now)
+
+            // Register every peer in the list
+            for (entry in hello.peers) {
+                // Don't register ourselves from a remote HELLO
+                if (entry.peerID == meshService.myPeerID) continue
+
+                val lastSeenMs = if (entry.lastSeen > 0) entry.lastSeen else now
+
+                // Persist into the BLE mesh peer table if we have crypto keys
+                if (entry.noiseKey != null && entry.signingKey != null) {
+                    meshService.updatePeerInfo(
+                        entry.peerID, entry.nickname,
+                        entry.noiseKey, entry.signingKey, false
+                    )
+                }
+
+                // Only update if newer than what we already know
+                val existing = pruned[entry.peerID]
+                if (existing == null || lastSeenMs > existing.lastSeen) {
+                    pruned[entry.peerID] = LoRaPeer(entry.peerID, entry.nickname, radioName, lastSeenMs)
+                }
+            }
+            pruned
+        }
+    }
+
+    /**
+     * Builds and sends a HelloPayload containing our own identity and all known BLE peers.
+     * Called automatically in response to a HELLO, and can be called proactively on connect.
+     */
+    fun sendLoRaHello(type: com.bitchat.android.protocol.MessageType =
+                         com.bitchat.android.protocol.MessageType.MTT_HELLOBACK) {
+        val myPeerID  = meshService.myPeerID
+        val myNickname = state.getNicknameValue() ?: myPeerID
+        val radioName = bleManager.discoveredDevices.value
+            .firstOrNull { it.isConnected }?.name ?: ""
+
+        // Self-entry: include ourselves so the receiver learns our identity and crypto keys
+        val selfEntry = com.bitchat.android.meshtastic.HelloPayload.HelloPeerEntry(
+            peerID             = myPeerID,
+            nickname           = myNickname,
+            isConnected        = true,
+            isVerifiedNickname = myNickname.isNotEmpty(),
+            noiseKey           = meshService.getStaticNoisePublicKey(),
+            signingKey         = meshService.getSigningPublicKey(),
+            lastSeen           = System.currentTimeMillis()
+        )
+
+        // Peer entries from the known BLE peer table
+        val allPeers = meshService.getAllPeers()
+        val peerEntries = listOf(selfEntry) + allPeers.map { (pid, info) ->
+            com.bitchat.android.meshtastic.HelloPayload.HelloPeerEntry(
+                peerID             = pid,
+                nickname           = info.nickname,
+                isConnected        = info.isConnected,
+                isVerifiedNickname = info.nickname.isNotEmpty(),
+                noiseKey           = info.noisePublicKey,
+                signingKey         = info.signingPublicKey,
+                lastSeen           = info.lastSeen
+            )
+        }
+
+        val hello = com.bitchat.android.meshtastic.HelloPayload(
+            helloId   = kotlin.random.Random.nextInt(0, 65536).toUShort(),
+            radioName = radioName,
+            peers     = peerEntries
+        )
+
+        val packet = com.bitchat.android.protocol.BitchatPacket(
+            type     = type.value,
+            ttl      = com.bitchat.android.util.AppConstants.MESSAGE_TTL_HOPS,
+            senderID = myPeerID,
+            payload  = hello.encode()
+        )
+        // padding = false: matches iOS toBinaryData(padding: false) for LoRa packets
+        val encoded = packet.toBinaryData(padding = false) ?: return
+        bleManager.sendMessage(encoded)
+        Log.i(TAG, "👋 LoRa ${type.name} sent (${peerEntries.size} peers incl. self, radio='$radioName')")
+    }
+
+    private fun sendLoRaHelloBack() = sendLoRaHello(com.bitchat.android.protocol.MessageType.MTT_HELLOBACK)
     fun cancelMediaSend(messageId: String) {
         // Delegate to MediaSendingManager which tracks transfer IDs and cleans up UI state
         mediaSendingManager.cancelMediaSend(messageId)
@@ -640,7 +803,8 @@ class ChatViewModel(
                             senderID = meshService.myPeerID,
                             payload = content.toByteArray(Charsets.UTF_8)
                         )
-                        val encoded = packet.toBinaryData()
+                        // padding = false: iOS toBinaryData(padding: false) for all LoRa packets
+                        val encoded = packet.toBinaryData(padding = false)
                         if (encoded != null) {
                             bleManager.sendMessage(encoded)
                         } else {

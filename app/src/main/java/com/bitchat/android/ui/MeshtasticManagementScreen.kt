@@ -25,13 +25,16 @@ import com.bitchat.android.meshtastic.MeshtasticDevice
 fun MeshtasticManagementScreen(
     devices: List<MeshtasticDevice>,
     onDismiss: () -> Unit,
-    onDeviceClick: (MeshtasticDevice) -> Unit
+    onDeviceClick: (MeshtasticDevice) -> Unit,
+    onSendHello: (() -> Unit)? = null
 ) {
     // MARK: - Computed Properties
     val isDark = isSystemInDarkTheme()
     val backgroundColor = if (isDark) Color.Black else Color.White
     val textColor = if (isDark) Color.Green else Color(0f, 0.5f, 0f)
     val secondaryTextColor = textColor.copy(alpha = 0.7f)
+
+    val isAnyConnected = devices.any { it.isConnected }
 
     Column(
         modifier = Modifier
@@ -47,6 +50,23 @@ fun MeshtasticManagementScreen(
                 .fillMaxSize()
                 .padding(horizontal = 16.dp, vertical = 16.dp)
         ) {
+            // Send HELLO button (visible only when a radio is connected)
+            if (isAnyConnected && onSendHello != null) {
+                Button(
+                    onClick = onSendHello,
+                    colors = ButtonDefaults.buttonColors(containerColor = textColor),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Announce on LoRa (HELLO)",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        color = backgroundColor
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             // Discovered devices section
             Text(
                 text = "Discovered Devices",

@@ -61,6 +61,7 @@ fun MeshPeerListSheet(
     val peerNicknames by viewModel.peerNicknames.collectAsStateWithLifecycle()
     val peerRSSI by viewModel.peerRSSI.collectAsStateWithLifecycle()
     val selectedLocationChannel by viewModel.selectedLocationChannel.collectAsStateWithLifecycle()
+    val loraPeers by viewModel.loraPeers.collectAsStateWithLifecycle()
 
     // Bottom sheet state
     val sheetState = rememberModalBottomSheetState(
@@ -170,6 +171,31 @@ fun MeshPeerListSheet(
                                      }
                                 )
                             }
+                        }
+                    }
+
+                    // LoRa peers section (visible only when peers are known)
+                    if (loraPeers.isNotEmpty()) {
+                        item(key = "lora_header") {
+                            Text(
+                                text = "VIA LORA",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = colorScheme.onSurface.copy(alpha = 0.7f),
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 24.dp)
+                                    .padding(top = 16.dp, bottom = 4.dp)
+                            )
+                        }
+                        items(
+                            items = loraPeers.values.sortedBy { it.nickname.lowercase() },
+                            key = { "lora_${it.peerID}" }
+                        ) { peer ->
+                            LoRaPeerItem(
+                                peer = peer,
+                                colorScheme = colorScheme
+                            )
                         }
                     }
                 }
@@ -987,6 +1013,55 @@ fun PrivateChatSheet(
                     }
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun LoRaPeerItem(
+    peer: ChatViewModel.LoRaPeer,
+    colorScheme: ColorScheme
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 40.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Router,
+                contentDescription = "LoRa peer",
+                modifier = Modifier.size(14.dp),
+                tint = Color(0xFF4CAF50)
+            )
+            Text(
+                text = peer.nickname.ifEmpty { "LoRa:${peer.peerID.take(8)}" },
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = BASE_FONT_SIZE.sp
+                ),
+                color = colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (peer.radioName.isNotEmpty()) {
+            Text(
+                text = peer.radioName,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = (BASE_FONT_SIZE - 2).sp
+                ),
+                color = colorScheme.onSurface.copy(alpha = 0.5f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

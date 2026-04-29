@@ -319,6 +319,8 @@ class PeerManager {
     fun getAllPeerNicknames(): Map<String, String> {
         return peers.mapValues { it.value.nickname }
     }
+
+    fun getAllPeers(): Map<String, PeerInfo> = peers.toMap()
     
     /**
      * Get all peer RSSI values

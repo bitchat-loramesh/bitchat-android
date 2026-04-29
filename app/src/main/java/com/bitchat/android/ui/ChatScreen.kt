@@ -496,6 +496,9 @@ private fun ChatFloatingHeader(
                     } else {
                         bleManager.disconnectFromMeshtastic(device.device)
                     }
+                },
+                onSendHello = {
+                    viewModel.sendLoRaHello(com.bitchat.android.protocol.MessageType.MTT_HELLO)
                 }
             )
         }

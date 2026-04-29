@@ -47,6 +47,13 @@ class BluetoothMeshService(private val context: Context) {
 
     // My peer identification - derived from persisted Noise identity fingerprint (first 16 hex chars)
     val myPeerID: String = encryptionService.getIdentityFingerprint().take(16)
+
+    /** Build a signed IdentityAnnouncement for the local node, used for LoRa HELLOBACK. */
+    fun buildLocalAnnouncement(nickname: String): com.bitchat.android.model.IdentityAnnouncement? {
+        val noiseKey = encryptionService.getStaticPublicKey() ?: return null
+        val signingKey = encryptionService.getSigningPublicKey() ?: return null
+        return com.bitchat.android.model.IdentityAnnouncement(nickname, noiseKey, signingKey)
+    }
     private val peerManager = PeerManager()
     private val fragmentManager = FragmentManager()
     private val securityManager = SecurityManager(encryptionService, myPeerID)
@@ -1175,6 +1182,8 @@ class BluetoothMeshService(private val context: Context) {
      * Get peer nicknames
      */
     fun getPeerNicknames(): Map<String, String> = peerManager.getAllPeerNicknames()
+
+    fun getAllPeers(): Map<String, com.bitchat.android.mesh.PeerInfo> = peerManager.getAllPeers()
     
     /**
      * Get peer RSSI values  
@@ -1246,6 +1255,10 @@ class BluetoothMeshService(private val context: Context) {
 
     fun getStaticNoisePublicKey(): ByteArray? {
         return encryptionService.getStaticPublicKey()
+    }
+
+    fun getSigningPublicKey(): ByteArray? {
+        return encryptionService.getSigningPublicKey()
     }
     
     /**
