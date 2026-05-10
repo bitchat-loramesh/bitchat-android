@@ -189,6 +189,9 @@ class ChatViewModel(
     private val _loraPeers = MutableStateFlow<Map<String, LoRaPeer>>(emptyMap())
     val loraPeers: StateFlow<Map<String, LoRaPeer>> = _loraPeers.asStateFlow()
     private val LORA_PEER_TIMEOUT_MS = 30 * 60 * 1000L
+    // Minimum interval between proactive LoRa HELLOs triggered by received HELLOBACKs
+    private val LORA_GOSSIP_THROTTLE_MS = 60_000L
+    private var lastLoraGossipMs = 0L
     // Deduplication cache for LoRa packets (same key scheme as SecurityManager)
     private val loraSeenPackets = object : LinkedHashMap<String, Long>(256, 0.75f, true) {
         override fun removeEldestEntry(eldest: Map.Entry<String, Long>) =
@@ -311,7 +314,16 @@ class ChatViewModel(
 
                 com.bitchat.android.protocol.MessageType.MTT_HELLOBACK.value -> {
                     Log.i(TAG, "👋 LoRa HELLOBACK from $senderPeerID")
-                    processLoRaHello(senderPeerID, bitchatPacket.payload)
+                    val newPeers = processLoRaHello(senderPeerID, bitchatPacket.payload)
+                    // If we learned new peers, propagate them to the LoRa network (throttled)
+                    if (newPeers > 0) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastLoraGossipMs > LORA_GOSSIP_THROTTLE_MS) {
+                            lastLoraGossipMs = now
+                            Log.i(TAG, "👋 Propagating $newPeers new LoRa peers via HELLO gossip")
+                            sendLoRaHello(com.bitchat.android.protocol.MessageType.MTT_HELLO)
+                        }
+                    }
                 }
 
                 else -> {
@@ -351,34 +363,33 @@ class ChatViewModel(
      * Decodes a HelloPayload from a HELLO or HELLOBACK BitchatPacket payload.
      * Registers the sender and all peers they know about into _loraPeers and the BLE peer table.
      */
-    private fun processLoRaHello(senderPeerID: String, payload: ByteArray) {
+    /** Returns the number of newly registered peers (new to our tables). */
+    private fun processLoRaHello(senderPeerID: String, payload: ByteArray): Int {
         val hello = com.bitchat.android.meshtastic.HelloPayload.decode(payload)
         if (hello == null) {
             Log.w(TAG, "👋 Could not decode HelloPayload from $senderPeerID")
-            return
+            return 0
         }
 
         val radioName = hello.radioName
         val now = System.currentTimeMillis()
+        var newPeerCount = 0
 
         Log.i(TAG, "👋 HelloPayload from $senderPeerID via radio '$radioName' — ${hello.peers.size} peers")
 
         _loraPeers.update { current ->
             val pruned = current.filter { e -> now - e.value.lastSeen < LORA_PEER_TIMEOUT_MS }.toMutableMap()
 
-            // Register the sender itself (nickname comes from their self-entry in peers list)
+            if (pruned[senderPeerID] == null) newPeerCount++
             val senderNickname = hello.peers.firstOrNull { it.peerID == senderPeerID }?.nickname
                 ?: "LoRa:${senderPeerID.take(8)}"
             pruned[senderPeerID] = LoRaPeer(senderPeerID, senderNickname, radioName, now)
 
-            // Register every peer in the list
             for (entry in hello.peers) {
-                // Don't register ourselves from a remote HELLO
                 if (entry.peerID == meshService.myPeerID) continue
 
                 val lastSeenMs = if (entry.lastSeen > 0) entry.lastSeen else now
 
-                // Persist into the BLE mesh peer table if we have crypto keys
                 if (entry.noiseKey != null && entry.signingKey != null) {
                     meshService.updatePeerInfo(
                         entry.peerID, entry.nickname,
@@ -386,14 +397,15 @@ class ChatViewModel(
                     )
                 }
 
-                // Only update if newer than what we already know
                 val existing = pruned[entry.peerID]
+                if (existing == null) newPeerCount++
                 if (existing == null || lastSeenMs > existing.lastSeen) {
                     pruned[entry.peerID] = LoRaPeer(entry.peerID, entry.nickname, radioName, lastSeenMs)
                 }
             }
             pruned
         }
+        return newPeerCount
     }
 
     /**
@@ -418,19 +430,37 @@ class ChatViewModel(
             lastSeen           = System.currentTimeMillis()
         )
 
-        // Peer entries from the known BLE peer table
+        // Peer entries from the BLE table (includes keys)
         val allPeers = meshService.getAllPeers()
-        val peerEntries = listOf(selfEntry) + allPeers.map { (pid, info) ->
+        val blePeerEntries = allPeers.map { (pid, info) ->
             com.bitchat.android.meshtastic.HelloPayload.HelloPeerEntry(
                 peerID             = pid,
                 nickname           = info.nickname,
                 isConnected        = info.isConnected,
-                isVerifiedNickname = info.nickname.isNotEmpty(),
+                isVerifiedNickname = info.isVerifiedNickname,
                 noiseKey           = info.noisePublicKey,
                 signingKey         = info.signingPublicKey,
                 lastSeen           = info.lastSeen
             )
         }
+
+        // Also relay LoRa-discovered peers that aren't in the BLE table (no keys)
+        val coveredIDs = allPeers.keys + myPeerID
+        val loraOnlyEntries = _loraPeers.value.values
+            .filter { it.peerID !in coveredIDs }
+            .map { loraPeer ->
+                com.bitchat.android.meshtastic.HelloPayload.HelloPeerEntry(
+                    peerID             = loraPeer.peerID,
+                    nickname           = loraPeer.nickname,
+                    isConnected        = false,
+                    isVerifiedNickname = false,
+                    noiseKey           = null,
+                    signingKey         = null,
+                    lastSeen           = loraPeer.lastSeen
+                )
+            }
+
+        val peerEntries = listOf(selfEntry) + blePeerEntries + loraOnlyEntries
 
         val hello = com.bitchat.android.meshtastic.HelloPayload(
             helloId   = kotlin.random.Random.nextInt(0, 65536).toUShort(),
